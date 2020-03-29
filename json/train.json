@@ -1,0 +1,62 @@
+{
+    # mode
+    "MODE": train
+
+    # number of training cases used in one step
+    "BATCH_SIZE": 2
+
+    # one epoch trains all training cases, One epoch=BATCH_SIZE*steps
+    "EPOCH": 1
+
+    # 3D image, train set (batch, in_depth, in_height, in_width, in_channels)
+    "CHANNEL_AXIS": 4
+
+    # number of filters at start node
+    "START_NUM_OF_FILTERS": 8
+
+    # number of class, for classification: 2
+    "NUM_CLASS": 1
+
+    # number of epoch to augment, if 2, 4*orig size new images are generated
+    # because one epoch including flip and rotate
+    "AUGMENT_EPOCH": 0
+
+    # Use residual network
+    "ISRES": false
+
+    # Use MaxPooling or not
+    "ISPOOL": true
+
+    # Deconvolution layer: deconv, pdn, upsampling
+    "DECONV": deconv
+
+    # loss function name: focal, dice, sce=default=softmax cross entropy
+    "LOSS": focal
+
+    # use Add or Concat in up-sampling
+    "ISADD": false
+
+    # U-Net_DEPTH=first layer to bottom layer in U-Net, so there are layer_depth-1 bridges
+    "UNET_DEPTH": 2
+
+    # how freq to save data to tensorboard, per SAVE_FREQ epoch
+    "SAVE_FREQ": 1
+
+    # file to save best model weight
+    CKPT_FILE: ./results/BestCKPT.ckpt
+
+    # file to save metrics [loss, accuracy ...]
+    CSV_FILE: ./results/train.csv
+
+    # initial learning rate for optimizer
+    INIT_LEARNING_RATE: 1e-1
+
+    # input file for network
+    INPUT_FILE: Data/data.npz
+
+    # ratio for test
+    TEST_RATIO: 0.2
+
+    # log dir
+    LOG_DIR: ./logs
+}
