@@ -31,7 +31,7 @@
     "DECONV": deconv
 
     # loss function name: focal, dice, sce=default=softmax cross entropy
-    "LOSS": focal
+    "LOSS": dice
 
     # use Add or Concat in up-sampling
     "ISADD": false
@@ -59,4 +59,10 @@
 
     # log dir
     LOG_DIR: ./logs
+
+    # early stop
+    EARLY_STOP: false
+
+    # Print intermediate layer
+    IS_PRINT_INTERMEDIATE_LAYER: true
 }

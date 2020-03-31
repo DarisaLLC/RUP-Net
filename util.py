@@ -46,7 +46,21 @@ class DataSet():
             x = f['x']
             y = f['y']
             x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_ratio, random_state=0, shuffle=False)
-            self.__dict__.update({'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test})
+            train_slice=self.tf_summary_slice(y_train[0,:,:,:,0])
+            test_slice=self.tf_summary_slice(y_test[0,:,:,:,0])
+            self.__dict__.update({'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test,
+                                  'train_slice': train_slice, 'test_slice': test_slice})
+
+    def tf_summary_slice(self, y):
+        max_num_ones=-1
+        max_i=0
+        for i in range(y.shape[0]):
+            num_ones=np.count_nonzero(y[i,:,:]>0)
+            if num_ones>max_num_ones:
+                max_i=i
+                max_num_ones=num_ones
+        return max_i
+
 
     @property
     def dict(self):
@@ -113,16 +127,21 @@ def softargmax(x, beta=1e10):
     return res
 
 
-def tomask(input, issoft=False, axis=4):
-    if issoft:
-        # DEBUG: not working
-        mask = softargmax(input)
-    else:
-        # mask = tf.argmax(input, axis=CHANNEL_AXIS, output_type=tf.int32)
-        mask = tf.math.argmax(input, axis=axis, output_type=tf.int32)
-    mask = tf.expand_dims(mask, axis)
-    return mask
+#def tomask(input, issoft=False, axis=4):
+#    if issoft:
+#        # DEBUG: not working
+#        mask = softargmax(input)
+#    else:
+#        # mask = tf.argmax(input, axis=CHANNEL_AXIS, output_type=tf.int32)
+#        mask = tf.math.argmax(input, axis=axis, output_type=tf.int32)
+#    mask = tf.expand_dims(mask, axis)
+#    return mask
+#    #return input
 
+def tomask(image, threshold=0.5):
+    image = tf.cast(image > threshold, dtype=tf.uint8)
+    #encoded_image = tf.image.encode_jpeg(image, format='grayscale', quality=100)
+    return image
 
 def cal_dice(y_true, y_pred, loss_type='jaccard', eps=1e-5, is_to_mask=True):
     # (Dice) Dice Coefficient
@@ -255,153 +274,31 @@ class AUC(keras.metrics.Metric):
 
 
 
-import time
+
 import matplotlib.pyplot as plt
-class TBCallback(keras.callbacks.TensorBoard):
-    def __init__(self,
-                 log_dir='logs',
-                 histogram_freq=1,
-                 write_graph=True,
-                 write_images=False,
-                 update_freq='epoch',
-                 profile_batch=2,
-                 embeddings_freq=0,
-                 embeddings_metadata=None,
-                 **kwargs):
-        super(TBCallback, self).__init__(log_dir,
-                                         histogram_freq,
-                                         write_graph,
-                                         write_images,
-                                         update_freq,
-                                         profile_batch,
-                                         embeddings_freq,
-                                         embeddings_metadata,
-                                         **kwargs)
+def mask_to_image(mask):
+    my_cm = plt.cm.get_cmap('gray')
+    m_max = np.max(mask)
+    m_min = np.min(mask)
+    if abs(m_max) < 1e-5:
+        norm_mask = mask
+    else:
+        norm_mask = (mask - m_min) / (m_max - m_min)
+    img = my_cm(norm_mask)
+    return img
 
-    def on_epoch_begin(self, epoch, logs=None):
-        super(TBCallback, self).on_epoch_begin(epoch, logs)
-        self.epoch_time_start = time.time()
-        return
+def extract_layer_image(layer, batch_i=0, slice_i=0, feature_i=0):
+    '''
+    extract one layer image from CNN 3d network
 
-    def on_epoch_end(self, epoch, logs=None):
-        super(TBCallback, self).on_epoch_end(epoch, logs)
-        period = time.time() - self.epoch_time_start
-        print("\n\nTraing time {:7.4f} s".format(period))
-        print("logs = ", logs)
-        for i in self._writers:
-            with self._get_writer(i).as_default():
-                if i == "train":
-                    lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
-                    tf.summary.scalar('Learning Rate', lr, step=epoch)
+    :param layer: which network layer
+    :param feature_i: which feature of the network layer
+    :param img_layer: image layer
+    :return: 2d image
+    '''
 
-        # save_layer_pos=[0.3,0.4,0.5,0.6]
-
-        # for i in self._writers:
-        #    if i == "train":
-        #        x = x_train
-        #        y = y_train
-        #    else:
-        #        x = x_test
-        #        y = y_test
-        #    #DEBUG check: 1 has images, 0 might not have.
-        #    x=x[1][tf.newaxis,...]
-        #    y=y[1][tf.newaxis,...]
-        #    result = self.model.predict(x)
-        #    with self._get_writer(i).as_default():
-        #        nlayers=result.shape[1]
-        #        #plt.imsave("result.jpg",result[0,19,:,:,0])
-        #        tf.summary.scalar('Dice',cal_dice(y,result),step=epoch)
-        #        tf.summary.scalar('VOE',cal_voe(y,result),step=epoch)
-        #        tf.summary.scalar('RVD',cal_rvd(y,result),step=epoch)
-
-        #        #zero_m=tf.zeros_like(y)
-        #        #print("zero dice for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
-        #        #print("self dice for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
-        #        #print("zero dice for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
-        #        #print("self dice for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
-        #        #print("zero dice with mask for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
-        #        #print("self dice with mask for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
-        #        #print("zero dice with mask for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
-        #        #print("self dice with mask for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
-
-        #        maskdice=1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True)
-        #        if maskdice>0.95:
-        #            plt.imsave("y_true_mask.jpg", tomask(y)[0,19,:,:,0])
-        #            plt.imsave("y_pred_mask.jpg", tomask(result)[0,19,:,:,0])
-        #        print(i, "dice loss for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=False))
-        #        print(i, "dice loss with mask for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True))
-
-        #        true_mask = tomask(y)
-        #        pred_mask = tomask(result)
-        #        print("{} true mask max {}".format(i, tf.reduce_max(true_mask)))
-        #        print("{} pred mask max {}".format(i, tf.reduce_max(pred_mask)))
-        #        for k in save_layer_pos:
-        #            si=int(nlayers * k)
-        #            tf.summary.image(i + "/Prediction", self.extract_layer_image(layer=pred_mask, batch_i=0, slice_i=si, feature_i=0), step=epoch)
-        #            tf.summary.image(i + "/Truth", self.extract_layer_image(layer=true_mask, batch_i=0, slice_i=si, feature_i=0), step=epoch)
-
-        # with self._get_writer(i).as_default():
-        #    #for i in layer_outputs:
-        #    #    print(i.name)
-        #    #layers=[]
-        #    #for i in ['Output/Conv3D', 'Output']:
-        #    #    layers.append(self.model.get_layer(i+"/Identity:0").output)
-        #    #print("y test max is ", tf.reduce_max(y_test))
-        #    #pred_mask = tf.argmax(y_test, axis=CHANNEL_AXIS, output_type=tf.int32)
-        #    #pred_mask = pred_mask[..., tf.newaxis]
-        #    #print("y test pred mask shape is ", pred_mask.shape)
-        #    #for k in [0.3,0.4,0.5,0.6]:
-
-        #    for j,value in enumerate(result):
-        #        nlayers=value.shape[1]
-        #        if layer_outputs[j].name=="Output/Identity:0":
-        #            pred_mask = tomask(value)
-        #            for k in [0.3, 0.4, 0.5, 0.6]:
-        #                #tf.compat.v2.summary.image(scope + "/" + layer_outputs[i].name,
-        #                #                       self.extract_layer_image(layer=value, batch_i=0, slice_i=int(nlayers * k),
-        #                #                                                feature_i=0), step=epoch)
-        #                #tf.compat.v2.summary.image(scope + "/" + layer_outputs[i].name+"/1", self.extract_layer_image(layer=value, batch_i=0, slice_i=int(nlayers * k),
-        #                #                                    feature_i=1), step=epoch)
-        #                #res=np.asarray(res)
-        #                #pred_mask=tf.argmax(value, axis=CHANNEL_AXIS, output_type=tf.int32)
-        #                tf.summary.image(i + "/" + "Prediction",
-        #                                 self.extract_layer_image(layer=pred_mask, batch_i=0, slice_i=int(nlayers * k),
-        #                                                          feature_i=0), step=epoch)
-
-        #            if i == "train":
-        #                y=y_train
-        #            else:
-        #                y=y_test
-        #            true_mask = tomask(y)
-        #            tf.summary.scalar('Dice',tf.reduce_mean(cal_dice(true_mask,pred_mask)),step=epoch)
-        #            tf.summary.scalar('VOE',tf.reduce_mean(cal_voe(true_mask,pred_mask)),step=epoch)
-        #            tf.summary.scalar('RVD',tf.reduce_mean(cal_rvd(true_mask,pred_mask)),step=epoch)
-        #            for k in [0.3,0.4,0.5,0.6]:
-        #                tf.summary.image(i + "/" + "Truth", self.extract_layer_image(layer=true_mask, batch_i=1, slice_i=int(nlayers * k), feature_i=0), step=epoch)
-
-    def mask_to_image(self, mask):
-        my_cm = plt.cm.get_cmap('gray')
-        m_max = np.max(mask)
-        m_min = np.min(mask)
-        if abs(m_max) < 1e-5:
-            norm_mask = mask
-        else:
-            norm_mask = (mask - m_min) / (m_max - m_min)
-        img = my_cm(norm_mask)
-        return img
-
-    def extract_layer_image(self, layer, batch_i=0, slice_i=0, feature_i=0):
-        '''
-        extract one layer image from CNN 3d network
-
-        :param layer: which network layer
-        :param feature_i: which feature of the network layer
-        :param img_layer: image layer
-        :return: 2d image
-        '''
-
-        img = layer[batch_i, slice_i, :, :, feature_i]
-        img = self.mask_to_image(img)
-        img = tf.expand_dims(img, 0)
-        img_name = "batch{}_slice{}_feature{}".format(batch_i, slice_i, feature_i)
-        return tf.reshape(img, img.shape, img_name)
+    img = layer[batch_i, slice_i, :, :, feature_i]
+    img = mask_to_image(img)
+    img = tf.expand_dims(img, 0)
+    img_name = "batch{}_slice{}_feature{}".format(batch_i, slice_i, feature_i)
+    return tf.reshape(img, img.shape, img_name)

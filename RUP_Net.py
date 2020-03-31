@@ -13,6 +13,7 @@ class RUP_Net(object):
         print("tensorflow version: ", tf.__version__)
         self.hyperParams=hyperParams
         self.dataset = util.DataSet(hyperParams['INPUT_FILE'], hyperParams['TEST_RATIO']).dict
+
         self.train_set = tf.data.Dataset.from_tensor_slices((self.dataset['x_train'], self.dataset['y_train']))
         self.test_set = tf.data.Dataset.from_tensor_slices((self.dataset['x_test'], self.dataset['y_test']))
         self.augment(hyperParams['AUGMENT_EPOCH'])
@@ -30,21 +31,21 @@ class RUP_Net(object):
         ## model.summary()
         keras.utils.plot_model(self.model, 'RUP-Net.png', show_shapes=True)
 
+        self.log_dir = self.hyperParams['LOG_DIR'] + "/" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+
+
     def train(self):
+        outputFolder = os.path.dirname(self.hyperParams['CKPT_FILE'])
+        if not os.path.exists(outputFolder):
+            os.makedirs(outputFolder)
+
         SHUFFLE_SIZE = self.hyperParams['BATCH_SIZE'] * np.prod(self.dataset['y_train'].shape)
         self.train_set = self.train_set.batch(self.hyperParams['BATCH_SIZE']).shuffle(SHUFFLE_SIZE)
         print(self.train_set.element_spec)
 
-        earlystop = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-        reduceLR=keras.callbacks.ReduceLROnPlateau(monitor="loss", factor=0.1, min_delta=1e-4, patience=3)
-        csvlog = keras.callbacks.CSVLogger("train.csv",separator=',', append=False)
+        #csvlog = keras.callbacks.CSVLogger("train.csv",separator=',', append=False)
 
-        log_dir = self.hyperParams['LOG_DIR'] + "/" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-        outputFolder = os.path.dirname(self.hyperParams['CKPT_FILE'])
-        if not os.path.exists(outputFolder):
-           os.makedirs(outputFolder)
-
-        tb_callback = util.TBCallback(log_dir=log_dir, write_images=False, profile_batch=0, update_freq=self.hyperParams['SAVE_FREQ'])
+        tb_callback = TBCallback(log_dir=self.log_dir, write_images=False,histogram_freq=0, profile_batch=0, update_freq=self.hyperParams['SAVE_FREQ'], dataset=self.dataset)
         checkpointer = keras.callbacks.ModelCheckpoint(filepath=self.hyperParams['CKPT_FILE'],
                                                       monitor='val_dice',
                                                       mode='max',
@@ -53,9 +54,13 @@ class RUP_Net(object):
                                                       save_weights_only=True
                                                       )
         dynamic_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.5, patience=5, min_lr=1e-5, verbose=1)
+        cb = [tb_callback, checkpointer, dynamic_lr]
+        if self.hyperParams['EARLY_STOP']:
+            earlystop = keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+            cb.append(earlystop)
         history = self.model.fit(self.train_set, epochs=self.hyperParams['EPOCH'], validation_data=(self.dataset['x_test'], self.dataset['y_test']),
                                  validation_steps=self.hyperParams['BATCH_SIZE'],
-                                 callbacks=[tb_callback, checkpointer, dynamic_lr])
+                                 callbacks=cb)
 
         zero_m = tf.zeros_like(self.dataset['y_test'])
         print("zero accuracy for cal_accuracy is ", util.cal_accuracy(self.dataset['y_test'], zero_m))
@@ -68,9 +73,8 @@ class RUP_Net(object):
         print("self focal mask for cal_focal is ", util.cal_focal(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=True))
         print("history is ", history)
 
-        self.model.load_weights(self.hyperParams['CKPT_FILE'])
+        pred = self.predict(self.hyperParams['IS_PRINT_INTERMEDIATE_LAYER'])
 
-        pred = self.model.predict(self.dataset['x_test'])
         print("accuracy for pred is ", util.cal_accuracy(self.dataset['y_test'], pred))
         print("dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=True, loss_type='jaccard'))
         print("mask dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=False, loss_type='jaccard'))
@@ -81,6 +85,27 @@ class RUP_Net(object):
         with open(self.hyperParams['CSV_FILE'], mode='w') as f:
            hist_df = pd.DataFrame(history.history)
            hist_df.to_csv(f, index_label="epoch")
+
+    def predict(self, isPrintIntermediateLayer=True):
+        self.model.load_weights(self.hyperParams['CKPT_FILE'])
+        pred = self.model.predict(self.dataset['x_test'])
+
+        if isPrintIntermediateLayer:
+            layer_names=[]
+            layer_outputs=[]
+            for layer in self.model.layers:
+                if 'Conv' in layer.name:
+                    layer_names.append(layer.name)
+                    layer_outputs.append(layer.output)
+            inter_model = keras.models.Model(inputs=self.model.input, outputs=layer_outputs)
+            inter_pred = inter_model.predict(self.dataset['x_test'])
+            inter_file_writer = tf.summary.create_file_writer(self.log_dir+"/prediction")
+            with inter_file_writer.as_default():
+                for name, layer_image in zip(layer_names, inter_pred):
+                    #layer_image = util.tomask(layer_image)
+                    tf.summary.image("prediction/"+name, util.extract_layer_image(layer=layer_image, batch_i=0, slice_i=int(layer_image.shape[1]*0.5), feature_i=0), step=0)
+
+        return pred
 
     def u_net(self, input_layer, filters, conv_size, name=None, isres=True, ispool=False,
               layer_depth=4, deconv="deconv", isadd=True):
@@ -286,3 +311,96 @@ class RUP_Net(object):
                     self.train_set = self.train_set.concatenate(
                         orig.map(lambda x, y: (f(x), f(y)), num_parallel_calls=tf.data.experimental.AUTOTUNE))
             print("After augmentation, train_set size = ", self.dataset_len(self.train_set))
+
+
+
+class TBCallback(keras.callbacks.TensorBoard):
+    def __init__(self,
+                 log_dir='logs',
+                 histogram_freq=1,
+                 write_graph=True,
+                 write_images=False,
+                 update_freq='epoch',
+                 profile_batch=2,
+                 embeddings_freq=0,
+                 embeddings_metadata=None,
+                 dataset=None,
+                 **kwargs):
+        super(TBCallback, self).__init__(log_dir,
+                                         histogram_freq,
+                                         write_graph,
+                                         write_images,
+                                         update_freq,
+                                         profile_batch,
+                                         embeddings_freq,
+                                         embeddings_metadata,
+                                         **kwargs)
+        self.dataset=dataset
+
+    def on_epoch_begin(self, epoch, logs=None):
+        super(TBCallback, self).on_epoch_begin(epoch, logs)
+        self.epoch_time_start = time.time()
+        return
+
+    def on_epoch_end(self, epoch, logs=None):
+        super(TBCallback, self).on_epoch_end(epoch, logs)
+        period = time.time() - self.epoch_time_start
+        print("\n\nTraing time {:7.4f} s".format(period))
+        print("logs = ", logs)
+        if epoch % self.update_freq == 0:
+            for i in self._writers:
+                with self._get_writer(i).as_default():
+                    if i == "train":
+                        lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
+                        tf.summary.scalar('Learning Rate', lr, step=epoch)
+
+            for i in self._writers:
+                if i == "train":
+                    x = self.dataset['x_train']
+                    y = self.dataset['y_train']
+                    summary_slice = self.dataset['train_slice']
+                else:
+                    x = self.dataset['x_test']
+                    y = self.dataset['y_test']
+                    summary_slice = self.dataset['test_slice']
+                #DEBUG check: 1 has images, 0 might not have.
+                x=x[0][tf.newaxis,...]
+                y=y[0][tf.newaxis,...]
+                result = self.model.predict(x)
+                with self._get_writer(i).as_default():
+                    nlayers=result.shape[1]
+                    #plt.imsave("result.jpg",result[0,19,:,:,0])
+                    tf.summary.scalar('Dice',util.cal_dice(y,result),step=epoch)
+                    tf.summary.scalar('VOE',util.cal_voe(y,result),step=epoch)
+                    tf.summary.scalar('RVD',util.cal_rvd(y,result),step=epoch)
+
+                #    #zero_m=tf.zeros_like(y)
+                #    #print("zero dice for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
+                #    #print("self dice for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
+                #    #print("zero dice for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
+                #    #print("self dice for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
+                #    #print("zero dice with mask for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
+                #    #print("self dice with mask for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
+                #    #print("zero dice with mask for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
+                #    #print("self dice with mask for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
+
+                    #maskdice=1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True)
+                    #if maskdice>0.95:
+                    #plt.imsave("y_true_mask.jpg", util.tomask(y)[0,19,:,:,0])
+                    #plt.imsave("y_pred_mask.jpg", util.tomask(result)[0,19,:,:,0])
+                    if i == "train":
+                        plt.imsave("y_true_mask.jpg", y[0,summary_slice,:,:,0])
+                        plt.imsave("y_pred_mask.jpg", result[0,summary_slice,:,:,0])
+                        print("result shape is ",result.shape)
+                    #print(i, "dice loss for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=False))
+                    #print(i, "dice loss with mask for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True))
+
+                    #print("{} true max {}".format(i, tf.reduce_max(y)))
+                    #print("{} pred max {}".format(i, tf.reduce_max(result)))
+                    true_mask = util.tomask(y)
+                    pred_mask = util.tomask(result)
+                    #print("{} true mask max {}".format(i, tf.reduce_max(true_mask)))
+                    #print("{} pred mask max {}".format(i, tf.reduce_max(pred_mask)))
+
+                    tf.summary.image(i + "/Prediction", util.extract_layer_image(layer=pred_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)
+                    tf.summary.image(i + "/Truth", util.extract_layer_image(layer=true_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)
