@@ -1,5 +1,6 @@
 import hjson
 
+
 class HyperParams():
     """
     Class that loads hyperparameters from a json file.
@@ -13,7 +14,7 @@ class HyperParams():
         Saves parameters to json file
         """
         with open(json_path, 'w') as f:
-            #json.dump(self.__dict__, f, indent=4)
+            # json.dump(self.__dict__, f, indent=4)
             hjson.dump(self.__dict__, f, indent=4)
 
     def update(self, json_path):
@@ -36,6 +37,7 @@ class HyperParams():
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+
 class DataSet():
 
     def __init__(self, file_path, test_ratio):
@@ -45,22 +47,22 @@ class DataSet():
         with np.load(file_path) as f:
             x = f['x']
             y = f['y']
-            x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_ratio, random_state=0, shuffle=False)
-            train_slice=self.tf_summary_slice(y_train[0,:,:,:,0])
-            test_slice=self.tf_summary_slice(y_test[0,:,:,:,0])
+            x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_ratio, random_state=0,
+                                                                shuffle=False)
+            train_slice = self.tf_summary_slice(y_train[0, :, :, :, 0])
+            test_slice = self.tf_summary_slice(y_test[0, :, :, :, 0])
             self.__dict__.update({'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test,
                                   'train_slice': train_slice, 'test_slice': test_slice})
 
     def tf_summary_slice(self, y):
-        max_num_ones=-1
-        max_i=0
+        max_num_ones = -1
+        max_i = 0
         for i in range(y.shape[0]):
-            num_ones=np.count_nonzero(y[i,:,:]>0)
-            if num_ones>max_num_ones:
-                max_i=i
-                max_num_ones=num_ones
+            num_ones = np.count_nonzero(y[i, :, :] > 0)
+            if num_ones > max_num_ones:
+                max_i = i
+                max_num_ones = num_ones
         return max_i
-
 
     @property
     def dict(self):
@@ -69,6 +71,7 @@ class DataSet():
 
 import tensorflow as tf
 import tensorflow.keras as keras
+
 
 def cal_focal(y_true, y_pred, alpha=0.25, gamma=2, is_to_mask=True):
     if is_to_mask:
@@ -127,7 +130,7 @@ def softargmax(x, beta=1e10):
     return res
 
 
-#def tomask(input, issoft=False, axis=4):
+# def tomask(input, issoft=False, axis=4):
 #    if issoft:
 #        # DEBUG: not working
 #        mask = softargmax(input)
@@ -139,9 +142,12 @@ def softargmax(x, beta=1e10):
 #    #return input
 
 def tomask(image, threshold=0.5):
+    image = tf.cast(image, dtype=tf.float32)
     image = tf.cast(image > threshold, dtype=tf.uint8)
-    #encoded_image = tf.image.encode_jpeg(image, format='grayscale', quality=100)
+    # image = tf.cast(tf.math.sign(image - threshold), dtype=tf.uint8)
+    # encoded_image = tf.image.encode_jpeg(image, format='grayscale', quality=100)
     return image
+
 
 def cal_dice(y_true, y_pred, loss_type='jaccard', eps=1e-5, is_to_mask=True):
     # (Dice) Dice Coefficient
@@ -163,6 +169,8 @@ def cal_dice(y_true, y_pred, loss_type='jaccard', eps=1e-5, is_to_mask=True):
     else:
         raise ValueError("Unknown `loss_type`: %s" % loss_type)
     dice = (2 * intersection + eps) / (union + eps)
+    # dice = tf.cond(tf.math.reduce_max(y_pred_m)<1,
+    #               lambda : tf.constant(0, dtype=tf.float32),  lambda : dice)
     return dice
 
 
@@ -210,6 +218,7 @@ class MyAccuracy(keras.metrics.Metric):
         self.accuracy.assign(0.)
 
 
+
 class Dice(keras.metrics.Metric):
     def __init__(self, loss_type='jaccard', eps=1e-5, name='dice', **kwargs):
         super(Dice, self).__init__(name=name, **kwargs)
@@ -218,7 +227,7 @@ class Dice(keras.metrics.Metric):
         self.eps = eps
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        self.dice.assign(cal_dice(y_true, y_pred, self.loss_type, self.eps))
+        self.dice.assign(cal_dice(y_true, y_pred, self.loss_type, self.eps, is_to_mask=True))
 
     def result(self):
         return self.dice
@@ -241,6 +250,28 @@ class DiceLoss(keras.losses.Loss):
         return (1 - dice)
 
 
+class AdaptiveLoss(keras.losses.Loss):
+    def __init__(self, loss_type='jaccard', eps=1e-5, threshold=0.45,
+                 reduction=keras.losses.Reduction.AUTO,
+                 name='dice_loss'):
+        super().__init__(reduction=reduction, name=name)
+        self.loss_type = loss_type
+        self.eps = eps
+        self.threshold = threshold
+
+    def call(self, y_true, y_pred):
+        dice_loss = 1 - cal_dice(y_pred=y_pred, y_true=y_true, loss_type=self.loss_type, eps=self.eps, is_to_mask=False)
+        #focal_loss = cal_focal(y_true=y_true, y_pred=y_pred, alpha=0.25, gamma=2, is_to_mask=False)
+        bce = keras.losses.binary_crossentropy(y_true=y_true, y_pred=y_pred, from_logits=True)
+        return tf.cond(
+            dice_loss > self.threshold,
+            true_fn=lambda: dice_loss,
+            # false_fn=lambda: keras.losses.binary_crossentropy(y_pred=y_pred, y_true=y_true, from_logits=True)
+            # false_fn = lambda: focal_loss
+            false_fn=lambda: bce
+        )
+
+
 class SoftCrossEntropyLoss(keras.losses.Loss):
     def __init__(self, reduction=keras.losses.Reduction.AUTO, name='SCE_loss'):
         super().__init__(reduction=reduction, name=name)
@@ -254,6 +285,8 @@ class SoftCrossEntropyLoss(keras.losses.Loss):
 
 
 from sklearn.metrics import roc_auc_score
+
+
 class AUC(keras.metrics.Metric):
     def __init__(self, name='auc', **kwargs):
         super(AUC, self).__init__(name=name, **kwargs)
@@ -273,9 +306,9 @@ class AUC(keras.metrics.Metric):
         self.auc.assign(0.)
 
 
-
-
 import matplotlib.pyplot as plt
+
+
 def mask_to_image(mask):
     my_cm = plt.cm.get_cmap('gray')
     m_max = np.max(mask)
@@ -286,6 +319,7 @@ def mask_to_image(mask):
         norm_mask = (mask - m_min) / (m_max - m_min)
     img = my_cm(norm_mask)
     return img
+
 
 def extract_layer_image(layer, batch_i=0, slice_i=0, feature_i=0):
     '''
@@ -302,3 +336,90 @@ def extract_layer_image(layer, batch_i=0, slice_i=0, feature_i=0):
     img = tf.expand_dims(img, 0)
     img_name = "batch{}_slice{}_feature{}".format(batch_i, slice_i, feature_i)
     return tf.reshape(img, img.shape, img_name)
+
+def testimage():
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    f = np.load("./results/prediction.npz")
+    f = f['prediction']
+    plt.hist(f[0, 18, :, :, 0])
+    plt.imshow(f[0, 18, :, :, 0], cmap='gray')
+
+    def itom(x):
+        return np.piecewise(x, [x <= 0.5, x > 0.5], [lambda x: 0, lambda x: 1])
+
+    xxx = itom(f[0, 18, :, :, 0])
+    plt.imshow(xxx, cmap='gray')
+    zeros=np.zeros_like(f)
+
+
+    import tensorflow as tf
+    import tensorflow_addons as tfa
+    #bce = tf.keras.losses.BinaryCrossentropy(from_logits=False)
+    #bce(f,zeros).numpy()
+    #dl = tfa.losses.GIoULoss(mode='giou')
+    #dl(f[0,0,:,:,0],zeros[0,0,:,:,0]).numpy()
+
+
+
+    y_true=[0.,0.,1.,1., 0.]
+    y_pred=[ [0.0, 0.0, 1.0, 1.0, 0.0],
+             [0.1, 0.3, 0.8, 0.9, 0.7],
+             [0.9, 0.8, 0.1, 0.3, 0.4],
+             [0.0, 0.0, 0.0, 0.0, 0.0],
+             [1.0, 1.0, 0.0, 0.0, 1.0]
+             ]
+    from_logits=[True,False]
+    mode = ['giou','iou']
+
+    for i in y_pred:
+        #print(1-cal_dice(y_true, i, is_to_mask=False))
+        print(cal_focal(y_true, i, is_to_mask=False))
+        print(focal_loss(y_true, i))
+
+    for i in y_pred:
+        print("For y_true = {}, y_pred = {}".format(y_true, i))
+        for j in from_logits:
+            bce = tf.keras.losses.BinaryCrossentropy(from_logits=j)
+            f1 = tfa.losses.SigmoidFocalCrossEntropy(from_logits=j)
+            print("For from_logits = ",j)
+
+            print("BCE loss = {}".format(bce(y_true, i).numpy()))
+            print("Focal loss = {}".format(f1(y_true,i).numpy()))
+            print("-----------")
+        for j in mode:
+            print("mode for dice = ", j)
+            dl = tfa.losses.GIoULoss(mode=j)
+            print("Dice loss = {}".format(dl(y_true,i).numpy()))
+            print("-----------")
+
+    ## Compare       Logits        BCE        FOCAL
+    ## self           False        0          0
+    ## real           False        0.20       0.03
+    ## oppo_real      False        1.85       2.79
+    ## zero           False        7.71       7.71
+    ## oppo           False        15.38      30.71
+
+    ## self           True         0.50       0.27
+    ## real           True         0.58       0.38
+    ## oppo_real      True         0.90       0.95
+    ## zero           True         0.69       0.35
+    ## oppo           True         1.00       1.14
+
+    ## Compare       MODE        Dice Loss
+    ## self          giou        0
+    ## real          giou        0.58
+    ## oppo_real     giou        1.0
+    ## oppo          giou        1.0
+
+    ## self          iou         0
+    ## real          iou         0.58
+    ## oppo_real     iou         1.0
+    ## oppo          iou         1.0
+
+    ##print(1-cal_dice(y_true, y_pred, is_to_mask=True).numpy())
+    ##print(cal_focal(y_true, y_pred, is_to_mask=False).numpy())
+
+
+

@@ -22,7 +22,7 @@ def main():
 
     hyperParams = util.HyperParams(args.json_file).dict
     net = RUP_Net(hyperParams=hyperParams)
-    net.model.summary()
+    #net.model.summary()
     getattr(net, hyperParams['MODE'])()
 
 

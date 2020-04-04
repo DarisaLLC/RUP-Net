@@ -1,12 +1,14 @@
 import tensorflow as tf
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import tensorflow.keras as keras
+import tensorflow_addons as tfa
 import util
 import matplotlib.pyplot as plt
 import numpy as np
 import time
 import os
 import pandas as pd
+
 
 class RUP_Net(object):
     def __init__(self, hyperParams):
@@ -20,15 +22,21 @@ class RUP_Net(object):
         self.model = self.build_net()
         if hyperParams['LOSS'] == "focal":
             loss = util.FocalLoss(alpha=0.25, gamma=2, name="focal_loss"),
-        elif hyperParams['LOSS'] == "dice":
+            #loss = tfa.losses.SigmoidFocalCrossEntropy(from_logits=False),
+        elif hyperParams['LOSS'] == "giou":
             loss = util.DiceLoss(loss_type='jaccard', eps=1e-5, name='dice_loss')
+            #loss = tfa.losses.GIoULoss(mode='giou'),
+        elif hyperParams['LOSS'] == "adaptive":
+            loss = util.AdaptiveLoss(loss_type='jaccard', eps=1e-5, threshold = self.hyperParams['ADAPTIVE_THRESHOLD'], name='adaptive_loss')
         else:
-            loss = keras.losses.binary_crossentropy(from_logits=True)
+            #loss = keras.losses.binary_crossentropy(from_logits=True)
+            #loss = 'binary_crossentropy'
+            loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
 
         self.model.compile(optimizer=keras.optimizers.Adam(learning_rate=self.hyperParams['INIT_LEARNING_RATE']),
                       loss=loss,
-                      metrics=['binary_accuracy', util.MyAccuracy(name="accuracy"), util.Dice(loss_type='jaccard', eps=1e-5, name='dice')])
-        ## model.summary()
+                      metrics=['accuracy', util.Dice(loss_type='jaccard', eps=1e-5, name='dice')])
+        #metrics = [util.MyAccuracy(name="accuracy"), util.Dice(loss_type='jaccard', eps=1e-5, name='dice')])
         keras.utils.plot_model(self.model, 'RUP-Net.png', show_shapes=True)
 
         self.log_dir = self.hyperParams['LOG_DIR'] + "/" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
@@ -39,13 +47,15 @@ class RUP_Net(object):
         if not os.path.exists(outputFolder):
             os.makedirs(outputFolder)
 
+        #uf = self.hyperParams['SAVE_FREQ']*(self.dataset_len(self.train_set))
         SHUFFLE_SIZE = self.hyperParams['BATCH_SIZE'] * np.prod(self.dataset['y_train'].shape)
         self.train_set = self.train_set.batch(self.hyperParams['BATCH_SIZE']).shuffle(SHUFFLE_SIZE)
+        #Now the length of dataset is already divide by batch_size (see self.train_set.batch(....) )
         print(self.train_set.element_spec)
 
         #csvlog = keras.callbacks.CSVLogger("train.csv",separator=',', append=False)
 
-        tb_callback = TBCallback(log_dir=self.log_dir, write_images=False,histogram_freq=0, profile_batch=0, update_freq=self.hyperParams['SAVE_FREQ'], dataset=self.dataset)
+        tb_callback = TBCallback(log_dir=self.log_dir, write_images=False,histogram_freq=0, profile_batch=0, update_freq='epoch', dataset=self.dataset)
         checkpointer = keras.callbacks.ModelCheckpoint(filepath=self.hyperParams['CKPT_FILE'],
                                                       monitor='val_dice',
                                                       mode='max',
@@ -62,33 +72,41 @@ class RUP_Net(object):
                                  validation_steps=self.hyperParams['BATCH_SIZE'],
                                  callbacks=cb)
 
-        zero_m = tf.zeros_like(self.dataset['y_test'])
-        print("zero accuracy for cal_accuracy is ", util.cal_accuracy(self.dataset['y_test'], zero_m))
-        print("self accuracy for cal_accuracy is ", util.cal_accuracy(self.dataset['y_test'], self.dataset['y_test']))
-        print("zero dice for cal_dice is ", util.cal_dice(self.dataset['y_test'], zero_m, is_to_mask=False, loss_type='jaccard'))
-        print("self dice for cal_dice is ", util.cal_dice(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=False, loss_type='jaccard'))
-        print("zero focal for cal_focal is ", util.cal_focal(self.dataset['y_test'], zero_m, is_to_mask=False))
-        print("self focal for cal_focal is ", util.cal_focal(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=False))
-        print("zero focal mask for cal_focal is ", util.cal_focal(self.dataset['y_test'], zero_m, is_to_mask=True))
-        print("self focal mask for cal_focal is ", util.cal_focal(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=True))
-        print("history is ", history)
+        #zero_m = tf.ones_like(self.dataset['y_test'])
+        #zero_m = 0.2 *zero_m
+        #print("zero accuracy for cal_accuracy is ", util.cal_accuracy(self.dataset['y_test'], zero_m))
+        #print("self accuracy for cal_accuracy is ", util.cal_accuracy(self.dataset['y_test'], self.dataset['y_test']))
+        #print("zero dice for cal_dice is ", util.cal_dice(self.dataset['y_test'], zero_m, is_to_mask=False, loss_type='jaccard'))
+        #print("self dice for cal_dice is ", util.cal_dice(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=False, loss_type='jaccard'))
+        #print("zero dice mask for cal_dice is ", util.cal_dice(self.dataset['y_test'], zero_m, is_to_mask=True, loss_type='jaccard'))
+        #print("self dice mask for cal_dice is ", util.cal_dice(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=True, loss_type='jaccard'))
 
-        pred = self.predict(self.hyperParams['IS_PRINT_INTERMEDIATE_LAYER'])
+        #print("zero focal for cal_focal is ", util.cal_focal(self.dataset['y_test'], zero_m, is_to_mask=False))
+        #print("self focal for cal_focal is ", util.cal_focal(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=False))
+        #print("zero focal mask for cal_focal is ", util.cal_focal(self.dataset['y_test'], zero_m, is_to_mask=True))
+        #print("self focal mask for cal_focal is ", util.cal_focal(self.dataset['y_test'], self.dataset['y_test'], is_to_mask=True))
+        #print("history is ", history)
 
-        print("accuracy for pred is ", util.cal_accuracy(self.dataset['y_test'], pred))
-        print("dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=True, loss_type='jaccard'))
-        print("mask dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=False, loss_type='jaccard'))
+        #print("tf.math.sign([0., 2., -3., -0.5, 0.3]) = ", tf.math.sign([0., 2., -3., -0.5, 0.3]))
 
-        outputFolder = os.path.dirname(self.hyperParams['CSV_FILE'])
-        if not os.path.exists(outputFolder):
-           os.makedirs(outputFolder)
-        with open(self.hyperParams['CSV_FILE'], mode='w') as f:
-           hist_df = pd.DataFrame(history.history)
-           hist_df.to_csv(f, index_label="epoch")
+        if self.hyperParams['EPOCH']>1 and self.hyperParams['MODE'] == 'train':
+            pred = self.predict(self.hyperParams['IS_PRINT_INTERMEDIATE_LAYER'])
 
-    def predict(self, isPrintIntermediateLayer=True):
+            print("accuracy for pred is ", util.cal_accuracy(self.dataset['y_test'], pred))
+            print("dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=True, loss_type='jaccard'))
+            print("mask dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=False, loss_type='jaccard'))
+
+            outputFolder = os.path.dirname(self.hyperParams['CSV_FILE'])
+            if not os.path.exists(outputFolder):
+               os.makedirs(outputFolder)
+            with open(self.hyperParams['CSV_FILE'], mode='w') as f:
+               hist_df = pd.DataFrame(history.history)
+               hist_df.to_csv(f, index_label="epoch")
+
+    def predict(self, isPrintIntermediateLayer=False):
         self.model.load_weights(self.hyperParams['CKPT_FILE'])
         pred = self.model.predict(self.dataset['x_test'])
+        np.savez(self.hyperParams['OUT_PRED_FILE'], prediction=pred)
 
         if isPrintIntermediateLayer:
             layer_names=[]
@@ -97,13 +115,22 @@ class RUP_Net(object):
                 if 'Conv' in layer.name:
                     layer_names.append(layer.name)
                     layer_outputs.append(layer.output)
+
             inter_model = keras.models.Model(inputs=self.model.input, outputs=layer_outputs)
             inter_pred = inter_model.predict(self.dataset['x_test'])
             inter_file_writer = tf.summary.create_file_writer(self.log_dir+"/prediction")
+            y_true=self.dataset['y_test'][0][tf.newaxis, ...]
             with inter_file_writer.as_default():
+                slice = self.dataset['test_slice']
+                #tf.summary.image("prediction/Truth", util.extract_layer_image(layer=util.tomask(y_true), batch_i=0, slice_i=slice, feature_i=0), step=0)
+                #tf.summary.image("prediction/Prediction", util.extract_layer_image(layer=util.tomask(pred), batch_i=0, slice_i=slice, feature_i=0), step=0)
+                tf.summary.image("prediction/Truth", util.extract_layer_image(layer=util.tomask(y_true), batch_i=0, slice_i=slice, feature_i=0), step=0)
+                tf.summary.image("prediction/Prediction", util.extract_layer_image(layer=util.tomask(pred), batch_i=0, slice_i=slice, feature_i=0), step=0)
+                #tf.summary.image("prediction/Input", util.extract_layer_image(layer=self.dataset['x_test'], batch_i=0, slice_i=slice, feature_i=0), step=0)
                 for name, layer_image in zip(layer_names, inter_pred):
                     #layer_image = util.tomask(layer_image)
                     tf.summary.image("prediction/"+name, util.extract_layer_image(layer=layer_image, batch_i=0, slice_i=int(layer_image.shape[1]*0.5), feature_i=0), step=0)
+
 
         return pred
 
@@ -141,8 +168,8 @@ class RUP_Net(object):
             else:
                 # implenment PDN here
                 x = x
-            # x = keras.layers.BatchNormalization(name=name+decname+"/BN")(x)
-            # x = keras.layers.Activation('relu',name=name+decname+"/Activation")(x)
+            x = keras.layers.BatchNormalization(name=name+decname+"/BN")(x)
+            x = keras.layers.Activation('relu',name=name+decname+"/Activation")(x)
             return x
 
         # up-sampling
@@ -180,9 +207,9 @@ class RUP_Net(object):
                                     bias_initializer='he_uniform',
                                     # kernel_regularizer=keras.regularizers.l2(0.01), bias_regularizer=keras.regularizers.l2(0.01),
                                     name=name + "/Conv3D_" + str_i)(x)
-            # x = keras.layers.BatchNormalization(name=name+"/BN_"+str_i)(x)
-            # x = keras.layers.Activation("relu",name=name+"/Activation_"+str_i)(x)
-            # x = keras.layers.Dropout(0.5, name=name+"/Dropout_"+str_i)(x)
+            x = keras.layers.BatchNormalization(name=name+"/BN_"+str_i)(x)
+            x = keras.layers.Activation("relu",name=name+"/Activation_"+str_i)(x)
+            x = keras.layers.Dropout(0.5, name=name+"/Dropout_"+str_i)(x)
 
         if isres:
             y = input_layer
@@ -196,7 +223,7 @@ class RUP_Net(object):
                 if mul != 1:
                     y = tf.tile(input=y, multiples=tf.constant([1, 1, 1, 1, mul]))
             x, cname = self.comb_layer(layers=[x, y], isadd=isadd, scope=name)
-            # x = keras.layers.BatchNormalization(name=cname+"/Comb_BN")(x)
+            x = keras.layers.BatchNormalization(name=cname+"/Comb_BN")(x)
 
         return x
 
@@ -235,7 +262,9 @@ class RUP_Net(object):
         #    x=keras.layers.Concatenate(name="U{}Contac".format(i))([x,input_layer])
 
         x = keras.layers.Conv3D(self.hyperParams['NUM_CLASS'], kernel_size=1, padding="same", name="Output/Conv3D")(x)
-        x = keras.layers.BatchNormalization(name="Output")(x)
+        x = keras.layers.BatchNormalization(name="Output/BN")(x)
+        #x = tf.math.sigmoid(x, name = 'Output/sigmoid')
+        x = keras.layers.Activation('sigmoid', name="Output")(x)
 
         model = keras.Model(input_layer, x, name="RUP-Net")
         return model
@@ -347,60 +376,62 @@ class TBCallback(keras.callbacks.TensorBoard):
         period = time.time() - self.epoch_time_start
         print("\n\nTraing time {:7.4f} s".format(period))
         print("logs = ", logs)
-        if epoch % self.update_freq == 0:
-            for i in self._writers:
-                with self._get_writer(i).as_default():
-                    if i == "train":
-                        lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
-                        tf.summary.scalar('Learning Rate', lr, step=epoch)
-
-            for i in self._writers:
+        #print("epoch {} % self.update_freq {} = {}".format(epoch, self.update_freq, (epoch % self.update_freq == 0)))
+        #if (epoch % self.update_freq) == 0: #do not use this line, otherwise no image output in tensorboard
+        for i in self._writers:
+            with self._get_writer(i).as_default():
                 if i == "train":
-                    x = self.dataset['x_train']
-                    y = self.dataset['y_train']
-                    summary_slice = self.dataset['train_slice']
-                else:
-                    x = self.dataset['x_test']
-                    y = self.dataset['y_test']
-                    summary_slice = self.dataset['test_slice']
-                #DEBUG check: 1 has images, 0 might not have.
-                x=x[0][tf.newaxis,...]
-                y=y[0][tf.newaxis,...]
-                result = self.model.predict(x)
-                with self._get_writer(i).as_default():
-                    nlayers=result.shape[1]
-                    #plt.imsave("result.jpg",result[0,19,:,:,0])
-                    tf.summary.scalar('Dice',util.cal_dice(y,result),step=epoch)
-                    tf.summary.scalar('VOE',util.cal_voe(y,result),step=epoch)
-                    tf.summary.scalar('RVD',util.cal_rvd(y,result),step=epoch)
+                    lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
+                    tf.summary.scalar('Learning Rate', lr, step=epoch)
 
-                #    #zero_m=tf.zeros_like(y)
-                #    #print("zero dice for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
-                #    #print("self dice for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
-                #    #print("zero dice for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
-                #    #print("self dice for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
-                #    #print("zero dice with mask for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
-                #    #print("self dice with mask for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
-                #    #print("zero dice with mask for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
-                #    #print("self dice with mask for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
+        for i in self._writers:
+            if i == "train":
+                x = self.dataset['x_train']
+                y = self.dataset['y_train']
+                summary_slice = self.dataset['train_slice']
+            else:
+                x = self.dataset['x_test']
+                y = self.dataset['y_test']
+                summary_slice = self.dataset['test_slice']
+            x=x[0][tf.newaxis,...]
+            y=y[0][tf.newaxis,...]
+            result = self.model.predict(x)
+            with self._get_writer(i).as_default():
+                nlayers=result.shape[1]
+                #plt.imsave("result.jpg",result[0,19,:,:,0])
+                #tf.summary.scalar('Dice',util.cal_dice(y,util.tomask(result)),step=epoch)
+                #tf.summary.scalar('VOE',util.cal_voe(y,util.tomask(result)),step=epoch)
+                #tf.summary.scalar('RVD',util.cal_rvd(y,util.tomask(result)),step=epoch)
 
-                    #maskdice=1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True)
-                    #if maskdice>0.95:
-                    #plt.imsave("y_true_mask.jpg", util.tomask(y)[0,19,:,:,0])
-                    #plt.imsave("y_pred_mask.jpg", util.tomask(result)[0,19,:,:,0])
-                    if i == "train":
-                        plt.imsave("y_true_mask.jpg", y[0,summary_slice,:,:,0])
-                        plt.imsave("y_pred_mask.jpg", result[0,summary_slice,:,:,0])
-                        print("result shape is ",result.shape)
-                    #print(i, "dice loss for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=False))
-                    #print(i, "dice loss with mask for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True))
+            #    #zero_m=tf.zeros_like(y)
+            #    #print("zero dice for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
+            #    #print("self dice for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
+            #    #print("zero dice for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=False))
+            #    #print("self dice for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=False))
+            #    #print("zero dice with mask for cal_dice is ", cal_dice(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
+            #    #print("self dice with mask for cal_dice is ", cal_dice(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
+            #    #print("zero dice with mask for cal_dice2 is ", cal_dice2(y, zero_m, loss_type="sorensen",eps=0, is_to_mask=True))
+            #    #print("self dice with mask for cal_dice2 is ", cal_dice2(y, y, loss_type="sorensen",eps=0, is_to_mask=True))
 
-                    #print("{} true max {}".format(i, tf.reduce_max(y)))
-                    #print("{} pred max {}".format(i, tf.reduce_max(result)))
-                    true_mask = util.tomask(y)
-                    pred_mask = util.tomask(result)
-                    #print("{} true mask max {}".format(i, tf.reduce_max(true_mask)))
-                    #print("{} pred mask max {}".format(i, tf.reduce_max(pred_mask)))
+                #maskdice=1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True)
+                #if maskdice>0.95:
+                #plt.imsave("y_true_mask.jpg", util.tomask(y)[0,19,:,:,0])
+                #plt.imsave("y_pred_mask.jpg", util.tomask(result)[0,19,:,:,0])
+                #if i == "train":
+                #    plt.imsave("y_true_mask.jpg", y[0,summary_slice,:,:,0])
+                #    plt.imsave("y_pred_mask.jpg", result[0,summary_slice,:,:,0])
+                #    print("result shape is ",result.shape)
+                #print(i, "dice loss for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=False))
+                #print(i, "dice loss with mask for cal_dice is ", 1-cal_dice(y, result, loss_type="jaccard",eps=0, is_to_mask=True))
 
-                    tf.summary.image(i + "/Prediction", util.extract_layer_image(layer=pred_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)
-                    tf.summary.image(i + "/Truth", util.extract_layer_image(layer=true_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)
+                #print("{} true max {}".format(i, tf.reduce_max(y)))
+                #print("{} pred max {}".format(i, tf.reduce_max(result)))
+                #true_mask = util.tomask(y)
+                #pred_mask = util.tomask(result)
+                true_mask = y
+                pred_mask = result
+                #print("{} true mask max {}".format(i, tf.reduce_max(true_mask)))
+                #print("{} pred mask max {}".format(i, tf.reduce_max(pred_mask)))
+
+                tf.summary.image(i + "/Prediction", util.extract_layer_image(layer=pred_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)
+                tf.summary.image(i + "/Truth", util.extract_layer_image(layer=true_mask, batch_i=0, slice_i=summary_slice, feature_i=0), step=epoch)

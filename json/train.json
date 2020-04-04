@@ -6,15 +6,15 @@
     "BATCH_SIZE": 2
 
     # one epoch trains all training cases, One epoch=BATCH_SIZE*steps
-    "EPOCH": 1
+    "EPOCH": 2
 
     # 3D image, train set (batch, in_depth, in_height, in_width, in_channels)
     "CHANNEL_AXIS": 4
 
     # number of filters at start node
-    "START_NUM_OF_FILTERS": 8
+    "START_NUM_OF_FILTERS": 4
 
-    # number of class, for classification: 2
+    # number of class, for classification: 1
     "NUM_CLASS": 1
 
     # number of epoch to augment, if 2, 4*orig size new images are generated
@@ -30,8 +30,11 @@
     # Deconvolution layer: deconv, pdn, upsampling
     "DECONV": deconv
 
-    # loss function name: focal, dice, sce=default=softmax cross entropy
-    "LOSS": dice
+    # loss function name: focal, giou, adaptive, bce=default=binary cross entropy
+    "LOSS": adaptive
+
+    # adaptive threshold, dice_loss<threshold, use dice loss, dice_loss>threshold, use binary cross entropy
+    "ADAPTIVE_THRESHOLD": 0.3
 
     # use Add or Concat in up-sampling
     "ISADD": false
@@ -40,7 +43,7 @@
     "UNET_DEPTH": 2
 
     # how freq to save data to tensorboard, per SAVE_FREQ epoch
-    "SAVE_FREQ": 1
+    "SAVE_FREQ": 10
 
     # file to save best model weight
     CKPT_FILE: ./results/BestCKPT.ckpt
@@ -53,6 +56,9 @@
 
     # input file for network
     INPUT_FILE: Data/data.npz
+
+    # output prediction file for network
+    OUT_PRED_FILE: ./results/prediction.npz
 
     # ratio for test
     TEST_RATIO: 0.2
