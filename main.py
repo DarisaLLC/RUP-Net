@@ -2,6 +2,7 @@ import sys
 import argparse
 from util import *
 from RUP_Net import *
+from shutil import copyfile
 
 
 #pay attention: "_" in main
@@ -24,6 +25,10 @@ def main():
     net = RUP_Net(hyperParams=hyperParams)
     #net.model.summary()
     getattr(net, hyperParams['MODE'])()
+    if hyperParams['MODE'] == 'train':
+        des = hyperParams['SAVE_MODEL'] + "/" + os.path.basename(args.json_file)
+        copyfile(args.json_file, des)
+
 
 
 if __name__ == "__main__":

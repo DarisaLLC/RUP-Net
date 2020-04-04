@@ -1,4 +1,4 @@
 #!/bin/bash
 
-rm -rf logs/ results/
+rm -rf results/
 

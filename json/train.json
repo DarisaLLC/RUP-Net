@@ -2,17 +2,20 @@
     # mode
     "MODE": train
 
+    # file to save best model weight
+    SAVE_MODEL: results/BestModel
+
     # number of training cases used in one step
     "BATCH_SIZE": 2
 
     # one epoch trains all training cases, One epoch=BATCH_SIZE*steps
-    "EPOCH": 2
+    "EPOCH": 200
 
     # 3D image, train set (batch, in_depth, in_height, in_width, in_channels)
     "CHANNEL_AXIS": 4
 
     # number of filters at start node
-    "START_NUM_OF_FILTERS": 4
+    "START_NUM_OF_FILTERS": 8
 
     # number of class, for classification: 1
     "NUM_CLASS": 1
@@ -30,26 +33,20 @@
     # Deconvolution layer: deconv, pdn, upsampling
     "DECONV": deconv
 
-    # loss function name: focal, giou, adaptive, bce=default=binary cross entropy
+    # loss function name: focal, dice, adaptive, bce=default=binary cross entropy
     "LOSS": adaptive
 
-    # adaptive threshold, dice_loss<threshold, use dice loss, dice_loss>threshold, use binary cross entropy
+    # adaptive threshold, dice_loss>threshold, use dice loss, dice_loss<threshold, use binary cross entropy
     "ADAPTIVE_THRESHOLD": 0.3
 
     # use Add or Concat in up-sampling
-    "ISADD": false
+    "ISADD": true
 
     # U-Net_DEPTH=first layer to bottom layer in U-Net, so there are layer_depth-1 bridges
-    "UNET_DEPTH": 2
+    "UNET_DEPTH": 4
 
     # how freq to save data to tensorboard, per SAVE_FREQ epoch
-    "SAVE_FREQ": 10
-
-    # file to save best model weight
-    CKPT_FILE: ./results/BestCKPT.ckpt
-
-    # file to save metrics [loss, accuracy ...]
-    CSV_FILE: ./results/train.csv
+    "SAVE_FREQ": 1
 
     # initial learning rate for optimizer
     INIT_LEARNING_RATE: 1e-1
@@ -57,14 +54,14 @@
     # input file for network
     INPUT_FILE: Data/data.npz
 
-    # output prediction file for network
-    OUT_PRED_FILE: ./results/prediction.npz
+    # output prediction file for network, root dir is SAVE_MODEL
+    OUT_PRED_FILE: prediction.npz
 
     # ratio for test
     TEST_RATIO: 0.2
 
-    # log dir
-    LOG_DIR: ./logs
+    # log dir, root dir is SAVE_MODEL
+    LOG_DIR: logs
 
     # early stop
     EARLY_STOP: false

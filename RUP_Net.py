@@ -10,6 +10,7 @@ import os
 import pandas as pd
 
 
+
 class RUP_Net(object):
     def __init__(self, hyperParams):
         print("tensorflow version: ", tf.__version__)
@@ -39,15 +40,15 @@ class RUP_Net(object):
         #metrics = [util.MyAccuracy(name="accuracy"), util.Dice(loss_type='jaccard', eps=1e-5, name='dice')])
         keras.utils.plot_model(self.model, 'RUP-Net.png', show_shapes=True)
 
-        self.log_dir = self.hyperParams['LOG_DIR'] + "/" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+        self.log_dir =  self.hyperParams['SAVE_MODEL'] + "/" + self.hyperParams['LOG_DIR'] + "/" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
 
+    def get_save_model_des(self):
+        des = self.hyperParams['SAVE_MODEL'] + "/" + os.path.basename(self.hyperParams['SAVE_MODEL'])
+        return des
 
     def train(self):
-        outputFolder = os.path.dirname(self.hyperParams['CKPT_FILE'])
-        if not os.path.exists(outputFolder):
-            os.makedirs(outputFolder)
+        os.makedirs(self.hyperParams['SAVE_MODEL'], exist_ok=True)
 
-        #uf = self.hyperParams['SAVE_FREQ']*(self.dataset_len(self.train_set))
         SHUFFLE_SIZE = self.hyperParams['BATCH_SIZE'] * np.prod(self.dataset['y_train'].shape)
         self.train_set = self.train_set.batch(self.hyperParams['BATCH_SIZE']).shuffle(SHUFFLE_SIZE)
         #Now the length of dataset is already divide by batch_size (see self.train_set.batch(....) )
@@ -55,8 +56,9 @@ class RUP_Net(object):
 
         #csvlog = keras.callbacks.CSVLogger("train.csv",separator=',', append=False)
 
-        tb_callback = TBCallback(log_dir=self.log_dir, write_images=False,histogram_freq=0, profile_batch=0, update_freq='epoch', dataset=self.dataset)
-        checkpointer = keras.callbacks.ModelCheckpoint(filepath=self.hyperParams['CKPT_FILE'],
+        tb_callback = TBCallback(log_dir=self.log_dir, write_images=False,histogram_freq=0, profile_batch=0, update_freq='epoch', dataset=self.dataset
+                                 )
+        checkpointer = keras.callbacks.ModelCheckpoint(filepath=self.get_save_model_des(),
                                                       monitor='val_dice',
                                                       mode='max',
                                                       verbose=1,
@@ -90,23 +92,23 @@ class RUP_Net(object):
         #print("tf.math.sign([0., 2., -3., -0.5, 0.3]) = ", tf.math.sign([0., 2., -3., -0.5, 0.3]))
 
         if self.hyperParams['EPOCH']>1 and self.hyperParams['MODE'] == 'train':
-            pred = self.predict(self.hyperParams['IS_PRINT_INTERMEDIATE_LAYER'])
+            pred = self.predict( isPrintIntermediateLayer = self.hyperParams['IS_PRINT_INTERMEDIATE_LAYER'])
 
-            print("accuracy for pred is ", util.cal_accuracy(self.dataset['y_test'], pred))
-            print("dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=True, loss_type='jaccard'))
-            print("mask dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=False, loss_type='jaccard'))
+            #print("accuracy for pred is ", util.cal_accuracy(self.dataset['y_test'], pred))
+            #print("dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=True, loss_type='jaccard'))
+            #print("mask dice for pred is ", util.cal_dice(self.dataset['y_test'], pred, is_to_mask=False, loss_type='jaccard'))
 
-            outputFolder = os.path.dirname(self.hyperParams['CSV_FILE'])
-            if not os.path.exists(outputFolder):
-               os.makedirs(outputFolder)
-            with open(self.hyperParams['CSV_FILE'], mode='w') as f:
-               hist_df = pd.DataFrame(history.history)
-               hist_df.to_csv(f, index_label="epoch")
+            #outputFolder = os.path.dirname(self.hyperParams['CSV_FILE'])
+            #if not os.path.exists(outputFolder):
+            #   os.makedirs(outputFolder)
+            #with open(self.hyperParams['CSV_FILE'], mode='w') as f:
+            #   hist_df = pd.DataFrame(history.history)
+            #   hist_df.to_csv(f, index_label="epoch")
 
     def predict(self, isPrintIntermediateLayer=False):
-        self.model.load_weights(self.hyperParams['CKPT_FILE'])
+        self.model.load_weights(self.get_save_model_des())
         pred = self.model.predict(self.dataset['x_test'])
-        np.savez(self.hyperParams['OUT_PRED_FILE'], prediction=pred)
+        np.savez(self.hyperParams['SAVE_MODEL'] + "/" + self.hyperParams['OUT_PRED_FILE'], prediction=pred)
 
         if isPrintIntermediateLayer:
             layer_names=[]
@@ -122,11 +124,8 @@ class RUP_Net(object):
             y_true=self.dataset['y_test'][0][tf.newaxis, ...]
             with inter_file_writer.as_default():
                 slice = self.dataset['test_slice']
-                #tf.summary.image("prediction/Truth", util.extract_layer_image(layer=util.tomask(y_true), batch_i=0, slice_i=slice, feature_i=0), step=0)
-                #tf.summary.image("prediction/Prediction", util.extract_layer_image(layer=util.tomask(pred), batch_i=0, slice_i=slice, feature_i=0), step=0)
-                tf.summary.image("prediction/Truth", util.extract_layer_image(layer=util.tomask(y_true), batch_i=0, slice_i=slice, feature_i=0), step=0)
-                tf.summary.image("prediction/Prediction", util.extract_layer_image(layer=util.tomask(pred), batch_i=0, slice_i=slice, feature_i=0), step=0)
-                #tf.summary.image("prediction/Input", util.extract_layer_image(layer=self.dataset['x_test'], batch_i=0, slice_i=slice, feature_i=0), step=0)
+                tf.summary.image("prediction/Truth", util.extract_layer_image(layer=y_true, batch_i=0, slice_i=slice, feature_i=0), step=0)
+                tf.summary.image("prediction/Prediction", util.extract_layer_image(layer=pred, batch_i=0, slice_i=slice, feature_i=0), step=0)
                 for name, layer_image in zip(layer_names, inter_pred):
                     #layer_image = util.tomask(layer_image)
                     tf.summary.image("prediction/"+name, util.extract_layer_image(layer=layer_image, batch_i=0, slice_i=int(layer_image.shape[1]*0.5), feature_i=0), step=0)
@@ -375,7 +374,7 @@ class TBCallback(keras.callbacks.TensorBoard):
         super(TBCallback, self).on_epoch_end(epoch, logs)
         period = time.time() - self.epoch_time_start
         print("\n\nTraing time {:7.4f} s".format(period))
-        print("logs = ", logs)
+        #print("logs = ", logs)
         #print("epoch {} % self.update_freq {} = {}".format(epoch, self.update_freq, (epoch % self.update_freq == 0)))
         #if (epoch % self.update_freq) == 0: #do not use this line, otherwise no image output in tensorboard
         for i in self._writers:
@@ -397,7 +396,7 @@ class TBCallback(keras.callbacks.TensorBoard):
             y=y[0][tf.newaxis,...]
             result = self.model.predict(x)
             with self._get_writer(i).as_default():
-                nlayers=result.shape[1]
+                #nlayers=result.shape[1]
                 #plt.imsave("result.jpg",result[0,19,:,:,0])
                 #tf.summary.scalar('Dice',util.cal_dice(y,util.tomask(result)),step=epoch)
                 #tf.summary.scalar('VOE',util.cal_voe(y,util.tomask(result)),step=epoch)
